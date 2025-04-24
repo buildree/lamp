@@ -268,24 +268,6 @@ EOF
     php -v
     end_message "PHP8.2をインストール"
 
-# phpmyadminをインストール
-    start_message "phpmyadminをインストール"
-    echo "phpmyadminをインストールしています..."
-    dnf --enablerepo=remi install -y phpMyAdmin
-    if [ $? -eq 0 ]; then
-        echo "phpmyadminのインストールが完了しました"
-        
-        # phpMyAdminの設定ファイルを編集してグローバルアクセスを許可
-        if [ -f /etc/httpd/conf.d/phpMyAdmin.conf ]; then
-            sudo sed -i 's#^ *Require local#Require all granted#g' /etc/httpd/conf.d/phpMyAdmin.conf
-            echo "phpMyAdminへのグローバルアクセスを許可しました"
-        else
-            echo "警告: phpMyAdminの設定ファイルが見つかりませんでした: /etc/httpd/conf.d/phpMyAdmin.conf"
-        fi
-    else
-        echo "エラー: phpMyAdminのインストールに失敗しました"
-    fi
-    end_message "phpmyadminをインストール"
 
     # php-fpmで動くように追記
     start_message "php-fpmで動くように追記"
@@ -574,17 +556,19 @@ LAMP環境構築完了！
 - ファイルアップロード上限: 32MB
 
 SELinux設定:
-- SELinuxがEnforcing状態の場合のみ、必要なポリシーを適用済み
+- SELinuxがEnforcing状態で稼働しています（標準設定）
 - ドキュメントルート(/var/www/html)には通常のWebコンテンツ用ポリシーを適用
 - PHP-FPMとの接続を許可済み
 - データベースへのネットワーク接続を許可するには、以下のコマンドを実行してください:
   sudo setsebool -P httpd_can_network_connect_db=1
 
-データベース利用時の注意点:
-- MySQLなどのデータベースを利用する場合は、上記SELinux設定が必要となる場合があります。
+データベース管理:
+- phpMyAdminはインストールされていません。必要な場合は別途インストールしてください
+- phpMyAdminをインストールする場合、SELinuxの追加設定が必要になる場合があります
+- MySQLなどのデータベースを利用する場合は、上記SELinux設定が必要となります
 
 注意事項:
-- WordPressなどでさらに大きなファイルをアップロードしたい場合は以下の方法で変更できます:
+- WordPressやLaravelなどのフレームワークで大きなファイルをアップロードする場合:
   1. php.ini編集: /etc/php.ini の「upload_max_filesize」と「post_max_size」の値を変更
   2. .htaccess使用: ドキュメントルート内の.htaccessファイルに以下を追記
     php_value upload_max_filesize 64M
