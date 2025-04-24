@@ -41,12 +41,13 @@ read -p "インストールを続行しますか？ (y/n): " choice
 [ "$choice" != "y" ] && { echo "インストールを中止しました。"; exit 0; }
 
 hash_file="/tmp/hashes.txt"
-expected_sha3_512="bddc1c5783ce4f81578362144f2b145f7261f421a405ed833d04b0774a5f90e6541a0eec5823a96efd9d3b8990f32533290cbeffdd763dc3dd43811c6b45cfbe"
+expected_sha3_512="4362c6f3b097c5ad413fb78510ead25d65ba3b59437afa4a89bcd545d9761544334de40c1f33b7e82a881ce4aa04ed08e1efadba759e38131d2fe2ec4a74fc3e"
 
 # リポジトリのシェルファイルの格納場所
 repository_file_path="/tmp/repository.sh"
 update_file_path="/tmp/update.sh"
 useradd_file_path="/tmp/useradd.sh"
+mysql_file_path="/tmp/rdbm84.sh"
 
 
 # ディストリビューションとバージョンの検出
@@ -110,6 +111,8 @@ if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_
             update_hash_sha3=$(grep "^update_hash_sha3_512=" "$hash_file" | cut -d '=' -f 2)
             useradd_hash=$(grep "^useradd_hash_sha512=" "$hash_file" | cut -d '=' -f 2)
             useradd_hash_sha3=$(grep "^useradd_hash_sha3_512=" "$hash_file" | cut -d '=' -f 2)
+            mysql_hash=$(grep "^rdbm84_hash_sha512=" "$hash_file" | cut -d '=' -f 2)
+            mysql_hash_sha3=$(grep "^rdbm84_hash_sha3_512=" "$hash_file" | cut -d '=' -f 2)
         else
             echo "ハッシュ値が一致しません。ファイルを削除します。"
             echo "期待されるSHA3-512: $expected_sha3_512"
@@ -265,6 +268,25 @@ EOF
     php -v
     end_message "PHP8.2をインストール"
 
+# phpmyadminをインストール
+    start_message "phpmyadminをインストール"
+    echo "phpmyadminをインストールしています..."
+    dnf --enablerepo=remi install -y phpMyAdmin
+    if [ $? -eq 0 ]; then
+        echo "phpmyadminのインストールが完了しました"
+        
+        # phpMyAdminの設定ファイルを編集してグローバルアクセスを許可
+        if [ -f /etc/httpd/conf.d/phpMyAdmin.conf ]; then
+            sudo sed -i 's#^ *Require local#Require all granted#g' /etc/httpd/conf.d/phpMyAdmin.conf
+            echo "phpMyAdminへのグローバルアクセスを許可しました"
+        else
+            echo "警告: phpMyAdminの設定ファイルが見つかりませんでした: /etc/httpd/conf.d/phpMyAdmin.conf"
+        fi
+    else
+        echo "エラー: phpMyAdminのインストールに失敗しました"
+    fi
+    end_message "phpmyadminをインストール"
+
     # php-fpmで動くように追記
     start_message "php-fpmで動くように追記"
     echo "Apache設定にPHP-FPM用のハンドラーを追加しています..."
@@ -299,20 +321,68 @@ EOF
     echo "info.phpの作成が完了しました"
     end_message "phpinfoの作成"
 
-    # アップロードディレクトリの作成（学習・テスト環境用）
-    start_message "アップロードディレクトリの作成"
-    echo "アップロード用ディレクトリを作成しています（学習・テスト環境用）..."
-    mkdir -p /var/www/html/upload
-    echo "アップロードディレクトリを作成しました"
-    echo "※注意: 本番環境では専用のLAMP環境やWordPress専用環境の構築を推奨します"
-    end_message "アップロードディレクトリの作成"
-
     # MySQLのインストール
-    start_message "アップロードディレクトリの作成"
-    curl --tlsv1.3 --proto https -o  https://raw.githubusercontent.com/buildree/common/main/database/rdbm84.sh;
-     source rdbm84.sh
-    end_message "アップロードディレクトリの作成"
+    start_message "MySQLのインストール"
+    echo "MySQLインストールスクリプトをダウンロードしています..."
+    
+    # MySQLインストールスクリプトをダウンロード
+    if ! curl --tlsv1.3 --proto https -o "$mysql_file_path" https://raw.githubusercontent.com/buildree/common/main/database/rdbm84.sh; then
+        echo "エラー: MySQLインストールスクリプトのダウンロードに失敗しました"
+        exit 1
+    fi
 
+    # ファイルの存在を確認
+    if [ ! -f "$mysql_file_path" ]; then
+        echo "エラー: ダウンロードしたファイルが見つかりません: $mysql_file_path"
+        exit 1
+    fi
+
+    # ファイルのSHA512ハッシュ値を計算
+    actual_sha512=$(sha512sum "$mysql_file_path" 2>/dev/null | awk '{print $1}')
+    if [ -z "$actual_sha512" ]; then
+        echo "エラー: SHA512ハッシュの計算に失敗しました"
+        exit 1
+    fi
+
+    # ファイルのSHA3-512ハッシュ値を計算
+    actual_sha3_512=$(sha3sum -a 512 "$mysql_file_path" 2>/dev/null | awk '{print $1}')
+
+    # システムにsha3sumがない場合の代替手段
+    if [ -z "$actual_sha3_512" ]; then
+        # OpenSSLを使用する方法
+        actual_sha3_512=$(openssl dgst -sha3-512 "$mysql_file_path" 2>/dev/null | awk '{print $2}')
+        
+        # それでも取得できない場合はエラー
+        if [ -z "$actual_sha3_512" ]; then
+            echo "エラー: SHA3-512ハッシュの計算に失敗しました。sha3sumまたはOpenSSLがインストールされていることを確認してください"
+            exit 1
+        fi
+    fi
+
+    # 両方のハッシュ値が一致した場合のみ処理を続行
+    if [ "$actual_sha512" == "$mysql_hash" ] && [ "$actual_sha3_512" == "$mysql_hash_sha3" ]; then
+        echo "ハッシュ検証が成功しました。MySQLのインストールを続行します。"
+        
+        # 実行権限を付与
+        chmod +x "$mysql_file_path"
+        
+        # スクリプトを実行
+        bash "$mysql_file_path"
+        
+        # 実行後に削除
+        rm -f "$mysql_file_path"
+    else
+        echo "エラー: MySQLインストールスクリプトのハッシュ検証に失敗しました。"
+        echo "期待されるSHA512: $mysql_hash"
+        echo "実際のSHA512: $actual_sha512"
+        echo "期待されるSHA3-512: $mysql_hash_sha3"
+        echo "実際のSHA3-512: $actual_sha3_512"
+        
+        # セキュリティリスクを軽減するため、検証に失敗したファイルを削除
+        rm -f "$mysql_file_path"
+        exit 1
+    fi
+    end_message "MySQLのインストール"
 
         # ユーザーを作成
         start_message
@@ -384,8 +454,16 @@ EOF
     echo "所有者の変更が完了しました"
     end_message "ドキュメントルート所有者変更"
 
+    # unicorn.cnf所有者変更
+    start_message "unicorn.cnf所有者変更"
+    echo "unicornユーザーでMySQLにログインできるようにします"
+    chown -R unicorn:unicorn /etc/my.cnf.d/unicorn.cnf
+    echo "所有者の変更が完了しました"
+    end_message "unicorn.cnf所有者変更"
+
+
     # SELinux設定
-    start_message "SELinux設定"
+start_message "SELinux設定"
     # SELinuxの状態を確認
     SELINUX_STATUS=$(getenforce 2>/dev/null || echo "Unknown")
     echo "現在のSELinux状態: $SELINUX_STATUS"
@@ -398,16 +476,39 @@ EOF
         semanage fcontext -a -t httpd_sys_content_t "/var/www/html(/.*)?"
         restorecon -Rv /var/www/html
         
-        # アップロードディレクトリの書き込み許可
-        echo "アップロードディレクトリに書き込み権限を設定しています..."
-        semanage fcontext -a -t httpd_sys_rw_content_t "/var/www/html/upload(/.*)?"
-        restorecon -Rv /var/www/html/upload
+        # ウェブユーザーグループを作成（存在しない場合）
+        if ! getent group webusers > /dev/null; then
+            groupadd webusers
+            echo "webusersグループを作成しました"
+        fi
         
-        # PHP-FPMの接続許可
-        echo "PHP-FPMとの接続を許可しています..."
+        # 必要なユーザーをwebusersグループに追加（unicornユーザーを例として）
+        if id "unicorn" &>/dev/null; then
+            usermod -a -G webusers unicorn
+            echo "unicornユーザーをwebusersグループに追加しました"
+            usermod -a -G webusers apache
+            echo "apacheユーザーをwebusersグループに追加しました"
+        fi
+        
+        # ドキュメントルートのパーミッション設定
+        echo "ウェブルートディレクトリの所有権と権限を設定しています..."
+        chown apache:webusers /var/www/html
+        chmod 775 /var/www/html
+        chmod g+s /var/www/html
+        
+        # SELinuxコンテキストとボールを設定
+        echo "SELinuxのセキュリティコンテキストと追加ポリシーを設定しています..."
+        semanage fcontext -a -t httpd_sys_rw_content_t "/var/www/html(/.*)?"
+        restorecon -Rv /var/www/html
+        
+        # 必要なSELinuxボール設定
         setsebool -P httpd_can_network_connect=1
+        setsebool -P httpd_read_user_content=1
+        setsebool -P httpd_enable_homedirs=1
         
         echo "SELinuxのポリシー設定が完了しました"
+        echo "webusersグループのメンバーは /var/www/html 配下で自由にコンテンツを作成できます"
+        echo "注意: 新しいユーザーを追加する場合は 'usermod -a -G webusers ユーザー名' を実行してください"
     elif [ "$SELINUX_STATUS" = "Permissive" ]; then
         echo "SELinuxはPermissive状態です。必要に応じてEnforcing状態に変更してください。"
         echo "※Enforcing状態に変更する場合は、再度このスクリプトを実行するか、SELinuxポリシーを手動で設定してください。"
@@ -438,7 +539,7 @@ EOF
     echo "PHP-FPMサービスの設定が完了しました"
     end_message "PHP-fpmのサービス設定"
 
-    # ファイアウォール設定
+# ファイアウォール設定
     start_message "ファイアウォール設定"
     echo "ファイアウォールでHTTPを許可しています..."
     firewall-cmd --permanent --add-service=http
@@ -451,47 +552,51 @@ EOF
     echo "ファイアウォール設定が完了しました"
     end_message "ファイアウォール設定"
 
-    cat <<EOF
+        # 権限設定
+        start_message "権限設定"
+        echo "デフォルトのumaskを0002に設定しています..."
+        umask 0002
+        end_message "権限設定"
 
-Apacheインストール完了！
+
+cat <<EOF
+LAMP環境構築完了！
 
 アクセス方法:
-- http://IPアドレス or ドメイン名
-- https://IPアドレス or ドメイン名
+- http://IPアドレス   または ドメイン名
+- https://IPアドレス  または ドメイン名
 
 設定ファイル: /etc/httpd/conf.d/ドメイン名.conf
 ドキュメントルート: /var/www/html
 
 セキュリティ設定:
-- ディレクトリトラバーサル対応のため、PHP実行範囲をドキュメントルート(/var/www/html)に制限しています
+- ディレクトリトラバーサル対策として、PHPの実行範囲をドキュメントルート(/var/www/html)に制限しています
 - ファイルアップロード上限: 32MB
-- アップロード専用ディレクトリ: /var/www/html/upload（書き込み権限設定済み）
 
 SELinux設定:
 - SELinuxがEnforcing状態の場合のみ、必要なポリシーを適用済み
 - ドキュメントルート(/var/www/html)には通常のWebコンテンツ用ポリシーを適用
-- アップロードディレクトリ(/var/www/html/upload)には書き込み可能なポリシーを適用
 - PHP-FPMとの接続を許可済み
-
-データベース利用時の注意事項:
-- MySQLなどのデータベースを後からインストールする場合、SELinuxで以下の設定が必要:
+- データベースへのネットワーク接続を許可するには、以下のコマンドを実行してください:
   sudo setsebool -P httpd_can_network_connect_db=1
 
-学習・テスト環境としての利用:
-- 本スクリプトで作成した環境は学習・テスト用に最適化されています
-- WordPressなどの本格的なCMSを使用する場合は、専用のLAMP環境構築を推奨します
+データベース利用時の注意点:
+- MySQLなどのデータベースを利用する場合は、上記SELinux設定が必要となる場合があります。
 
 注意事項:
 - WordPressなどでさらに大きなファイルをアップロードしたい場合は以下の方法で変更できます:
   1. php.ini編集: /etc/php.ini の「upload_max_filesize」と「post_max_size」の値を変更
   2. .htaccess使用: ドキュメントルート内の.htaccessファイルに以下を追記
-     php_value upload_max_filesize 64M
-     php_value post_max_size 64M
-     php_value memory_limit 128M
+    php_value upload_max_filesize 64M
+    php_value post_max_size 64M
+    php_value memory_limit 128M
 - Apache再起動は不要ですが、PHP-FPMの再起動が必要です: systemctl restart php-fpm
 - HTTP/2を有効にするには、SSLの設定ファイルに「Protocols h2 http/1.1」を追記してください
 - ドキュメントルートの所有者: unicorn
-- ドキュメントルートのグループ: apache
+- ドキュメントルートのグループ: webusers
+- 認証情報は /root/mysql_credentials.txt に保存されています
+- セキュリティのため、重要な環境では認証情報をより安全な場所に移動することを検討してください
+- mysql --defaults-file=/etc/my.cnf.d/unicorn.cnf コマンドでMySQLに接続できます
 EOF
 
 else
