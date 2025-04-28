@@ -41,7 +41,7 @@ read -p "インストールを続行しますか？ (y/n): " choice
 [ "$choice" != "y" ] && { echo "インストールを中止しました。"; exit 0; }
 
 hash_file="/tmp/hashes.txt"
-expected_sha3_512="bb4b9241b6f2c6ffbd278fdbdb6c205ab649223215d74bf863a9b52a3c0beb26b5758ba2ab0ae6d61870c21ce13d74341ec196d6c38cee0c8843bb56d8c806a4"
+expected_sha3_512="e8243148d093f686fb29d2a612a01f9189796f0d9ed07b485da6872709aa7f2449e9d866fbb8026a19f118e44c5a14a3546c15de4fc7cb4de001af607a09cb3f"
 
 # リポジトリのシェルファイルの格納場所
 repository_file_path="/tmp/repository.sh"
