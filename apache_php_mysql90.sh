@@ -41,7 +41,7 @@ read -p "インストールを続行しますか？ (y/n): " choice
 [ "$choice" != "y" ] && { echo "インストールを中止しました。"; exit 0; }
 
 hash_file="/tmp/hashes.txt"
-expected_sha3_512="451609f2e0e16b87eb5c624b37b42adfa3261c0cf272b4fb41fa55892ee3b962f7ef33c137fb5c9b0d3d340c75f6482ccde2c6952e775d2bb8770ab9aae91e84"
+expected_sha3_512="e8243148d093f686fb29d2a612a01f9189796f0d9ed07b485da6872709aa7f2449e9d866fbb8026a19f118e44c5a14a3546c15de4fc7cb4de001af607a09cb3f"
 
 # リポジトリのシェルファイルの格納場所
 repository_file_path="/tmp/repository.sh"
@@ -112,7 +112,8 @@ if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_
             useradd_hash=$(grep "^useradd_hash_sha512=" "$hash_file" | cut -d '=' -f 2)
             useradd_hash_sha3=$(grep "^useradd_hash_sha3_512=" "$hash_file" | cut -d '=' -f 2)
             mysql_hash=$(grep "^rdbm90_hash_sha512=" "$hash_file" | cut -d '=' -f 2)
-            mysql_hash_sha3=$(grep "^rdbm90_hash_sha3_512=" "$hash_file" | cut -d '=' -f 2)        else
+            mysql_hash_sha3=$(grep "^rdbm90_hash_sha3_512=" "$hash_file" | cut -d '=' -f 2)
+        else
             echo "ハッシュ値が一致しません。ファイルを削除します。"
             echo "期待されるSHA3-512: $expected_sha3_512"
             echo "実際のSHA3-512: $actual_sha3_512"
