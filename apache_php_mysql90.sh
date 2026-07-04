@@ -41,7 +41,7 @@ read -p "インストールを続行しますか？ (y/n): " choice
 [ "$choice" != "y" ] && { echo "インストールを中止しました。"; exit 0; }
 
 hash_file="/tmp/hashes.txt"
-expected_sha3_512="e8243148d093f686fb29d2a612a01f9189796f0d9ed07b485da6872709aa7f2449e9d866fbb8026a19f118e44c5a14a3546c15de4fc7cb4de001af607a09cb3f"
+expected_sha3_512="efbdceddcbeb6c3dd41cfde3cab4cda01208cab2bbb932696562e006af9fc5ef7965e6bd6ff9ab4fd154385e4fad5b16ce7374be19750175cf1e8804b94372ec"
 
 # リポジトリのシェルファイルの格納場所
 repository_file_path="/tmp/repository.sh"
@@ -132,11 +132,44 @@ if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_
     # EPELリポジトリとremiリポジトリのインストール
     start_message "EPELリポジトリとremiリポジトリのインストール"
     echo "EPELリポジトリとremiリポジトリをインストールします..."
-    curl --tlsv1.3 --proto https -o /tmp/repository.sh https://raw.githubusercontent.com/buildree/common/main/system/repository.sh
+    if ! curl --tlsv1.3 --proto https -o "$repository_file_path" https://raw.githubusercontent.com/buildree/common/main/system/repository.sh; then
+        echo "エラー: ファイルのダウンロードに失敗しました"
+        exit 1
+    fi
     echo "リポジトリスクリプトをダウンロードしました"
-    chmod +x /tmp/repository.sh
-    echo "リポジトリスクリプトを実行します..."
-    source /tmp/repository.sh
+
+    # ファイルのSHA512ハッシュ値を計算
+    actual_sha512=$(sha512sum "$repository_file_path" 2>/dev/null | awk '{print $1}')
+    if [ -z "$actual_sha512" ]; then
+        echo "エラー: SHA512ハッシュの計算に失敗しました"
+        exit 1
+    fi
+
+    # ファイルのSHA3-512ハッシュ値を計算
+    actual_sha3_512=$(sha3sum -a 512 "$repository_file_path" 2>/dev/null | awk '{print $1}')
+    if [ -z "$actual_sha3_512" ]; then
+        actual_sha3_512=$(openssl dgst -sha3-512 "$repository_file_path" 2>/dev/null | awk '{print $2}')
+        if [ -z "$actual_sha3_512" ]; then
+            echo "エラー: SHA3-512ハッシュの計算に失敗しました。sha3sumまたはOpenSSLがインストールされていることを確認してください"
+            exit 1
+        fi
+    fi
+
+    # 両方のハッシュ値が一致した場合のみ処理を続行
+    if [ "$actual_sha512" == "$repository_hash" ] && [ "$actual_sha3_512" == "$repository_hash_sha3" ]; then
+        echo "ハッシュ検証が成功しました。リポジトリスクリプトを実行します..."
+        chmod +x "$repository_file_path"
+        source "$repository_file_path"
+        rm -f "$repository_file_path"
+    else
+        echo "エラー: リポジトリスクリプトのハッシュ検証に失敗しました。"
+        echo "期待されるSHA512: $repository_hash"
+        echo "実際のSHA512: $actual_sha512"
+        echo "期待されるSHA3-512: $repository_hash_sha3"
+        echo "実際のSHA3-512: $actual_sha3_512"
+        rm -f "$repository_file_path"
+        exit 1
+    fi
     echo "リポジトリのインストールが完了しました"
     end_message "EPELリポジトリとremiリポジトリのインストール"
 
