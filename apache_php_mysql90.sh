@@ -40,16 +40,6 @@ EOF
 read -p "インストールを続行しますか？ (y/n): " choice
 [ "$choice" != "y" ] && { echo "インストールを中止しました。"; exit 0; }
 
-hash_file="/tmp/hashes.txt"
-expected_sha3_512="efbdceddcbeb6c3dd41cfde3cab4cda01208cab2bbb932696562e006af9fc5ef7965e6bd6ff9ab4fd154385e4fad5b16ce7374be19750175cf1e8804b94372ec"
-
-# リポジトリのシェルファイルの格納場所
-repository_file_path="/tmp/repository.sh"
-update_file_path="/tmp/update.sh"
-useradd_file_path="/tmp/useradd.sh"
-mysql_file_path="/tmp/rdbm90.sh"
-
-
 # ディストリビューションとバージョンの検出
 if [ -f /etc/os-release ]; then
   . /etc/os-release
@@ -80,48 +70,6 @@ echo "検出されたディストリビューション: $DIST_NAME $DIST_VERSION
 # Redhat系で8、9または10の場合のみ処理を実行
 if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_VERSION" -eq 9 || "$DIST_MAJOR_VERSION" -eq 10 ]]; then
 
-        # ハッシュファイルのダウンロード
-        start_message
-        if ! curl --tlsv1.3 --proto https -o "$hash_file" https://raw.githubusercontent.com/buildree/common/main/other/hashes.txt; then
-            echo "エラー: ファイルのダウンロードに失敗しました"
-            exit 1
-        fi
-
-        # ファイルのSHA3-512ハッシュ値を計算
-        actual_sha3_512=$(sha3sum -a 512 "$hash_file" 2>/dev/null | awk '{print $1}')
-        # sha3sumコマンドが存在しない場合の代替手段
-        if [ -z "$actual_sha3_512" ]; then
-            actual_sha3_512=$(openssl dgst -sha3-512 "$hash_file" 2>/dev/null | awk '{print $2}')
-
-            if [ -z "$actual_sha3_512" ]; then
-                echo "エラー: SHA3-512ハッシュの計算に失敗しました。sha3sumまたはOpenSSLがインストールされていることを確認してください。"
-                rm -f "$hash_file"
-                exit 1
-            fi
-        fi
-
-        # ハッシュ値を比較
-        if [ "$actual_sha3_512" == "$expected_sha3_512" ]; then
-            echo "ハッシュ値は一致します。ファイルを保存します。"
-            
-            # ハッシュ値ファイルの読み込み - ダウンロード成功後に行う
-            repository_hash=$(grep "^repository_hash_sha512=" "$hash_file" | cut -d '=' -f 2)
-            update_hash=$(grep "^update_hash_sha512=" "$hash_file" | cut -d '=' -f 2)
-            repository_hash_sha3=$(grep "^repository_hash_sha3_512=" "$hash_file" | cut -d '=' -f 2)
-            update_hash_sha3=$(grep "^update_hash_sha3_512=" "$hash_file" | cut -d '=' -f 2)
-            useradd_hash=$(grep "^useradd_hash_sha512=" "$hash_file" | cut -d '=' -f 2)
-            useradd_hash_sha3=$(grep "^useradd_hash_sha3_512=" "$hash_file" | cut -d '=' -f 2)
-            mysql_hash=$(grep "^rdbm90_hash_sha512=" "$hash_file" | cut -d '=' -f 2)
-            mysql_hash_sha3=$(grep "^rdbm90_hash_sha3_512=" "$hash_file" | cut -d '=' -f 2)
-        else
-            echo "ハッシュ値が一致しません。ファイルを削除します。"
-            echo "期待されるSHA3-512: $expected_sha3_512"
-            echo "実際のSHA3-512: $actual_sha3_512"
-            rm -f "$hash_file"
-            exit 1
-        fi
-        end_message
-
     # Gitリポジトリのインストール
     start_message "Gitリポジトリのインストール"
     echo "Gitをインストールしています..."
@@ -129,111 +77,78 @@ if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_
     echo "Gitのインストールが完了しました"
     end_message "Gitリポジトリのインストール"
 
-    # EPELリポジトリとremiリポジトリのインストール
+    # EPELリポジトリとremiリポジトリ、MySQL 9.0リポジトリのインストール
     start_message "EPELリポジトリとremiリポジトリのインストール"
     echo "EPELリポジトリとremiリポジトリをインストールします..."
-    if ! curl --tlsv1.3 --proto https -o "$repository_file_path" https://raw.githubusercontent.com/buildree/common/main/system/repository.sh; then
-        echo "エラー: ファイルのダウンロードに失敗しました"
-        exit 1
-    fi
-    echo "リポジトリスクリプトをダウンロードしました"
 
-    # ファイルのSHA512ハッシュ値を計算
-    actual_sha512=$(sha512sum "$repository_file_path" 2>/dev/null | awk '{print $1}')
-    if [ -z "$actual_sha512" ]; then
-        echo "エラー: SHA512ハッシュの計算に失敗しました"
-        exit 1
-    fi
+    case $DIST_ID in
+        "almalinux")
+            GPG_KEY="https://repo.almalinux.org/almalinux/RPM-GPG-KEY-AlmaLinux"
+            ;;
+        "rocky")
+            GPG_KEY="https://download.rockylinux.org/pub/rocky/RPM-GPG-KEY-Rocky-$DIST_VERSION_ID"
+            ;;
+        "centos-stream" | "centos")
+            GPG_KEY="https://www.centos.org/keys/RPM-GPG-KEY-CentOS-Official"
+            ;;
+        "rhel" | "redhat")
+            GPG_KEY="https://www.redhat.com/security/data/fd431d51.txt"
+            ;;
+        "ol")
+            GPG_KEY="https://yum.oracle.com/RPM-GPG-KEY-oracle-ol$DIST_VERSION_ID"
+            ;;
+        *)
+            echo "警告: 認識されないディストリビューションですが、処理を続行します"
+            GPG_KEY="https://repo.almalinux.org/almalinux/RPM-GPG-KEY-AlmaLinux"
+            ;;
+    esac
 
-    # ファイルのSHA3-512ハッシュ値を計算
-    actual_sha3_512=$(sha3sum -a 512 "$repository_file_path" 2>/dev/null | awk '{print $1}')
-    if [ -z "$actual_sha3_512" ]; then
-        actual_sha3_512=$(openssl dgst -sha3-512 "$repository_file_path" 2>/dev/null | awk '{print $2}')
-        if [ -z "$actual_sha3_512" ]; then
-            echo "エラー: SHA3-512ハッシュの計算に失敗しました。sha3sumまたはOpenSSLがインストールされていることを確認してください"
-            exit 1
+    rpm --import $GPG_KEY
+    dnf remove -y epel-release
+    dnf -y install epel-release
+
+    if [ "$DIST_MAJOR_VERSION" = "8" ]; then
+        dnf -y install https://rpms.remirepo.net/enterprise/remi-release-8.rpm
+    elif [ "$DIST_MAJOR_VERSION" = "9" ]; then
+        dnf -y install https://rpms.remirepo.net/enterprise/remi-release-9.rpm
+    elif [ "$DIST_MAJOR_VERSION" = "10" ]; then
+        dnf -y install https://rpms.remirepo.net/enterprise/remi-release-10.rpm
+    fi
+    rpm --import https://rpms.remirepo.net/RPM-GPG-KEY-remi
+
+    if [ "$DIST_MAJOR_VERSION" = "8" ]; then
+        rpm -ivh https://dev.mysql.com/get/mysql90-community-release-el8-1.noarch.rpm || {
+            echo "MySQL 9.0専用リポジトリが見つかりません。汎用リポジトリを使用します。"
+            rpm -ivh https://dev.mysql.com/get/mysql80-community-release-el8-4.noarch.rpm
+        }
+    elif [ "$DIST_MAJOR_VERSION" = "9" ]; then
+        rpm -ivh https://dev.mysql.com/get/mysql90-community-release-el9-1.noarch.rpm || {
+            echo "MySQL 9.0専用リポジトリが見つかりません。汎用リポジトリを使用します。"
+            rpm -ivh https://dev.mysql.com/get/mysql80-community-release-el9-4.noarch.rpm
+        }
+    elif [ "$DIST_MAJOR_VERSION" = "10" ]; then
+        rpm -ivh https://dev.mysql.com/get/mysql90-community-release-el10-2.noarch.rpm || {
+            echo "MySQL 9.0専用リポジトリが見つかりません。汎用リポジトリを使用します。"
+            rpm -ivh https://dev.mysql.com/get/mysql80-community-release-el10-2.noarch.rpm
+        }
+    fi
+    dnf config-manager --disable mysql*-community || echo "リポジトリ無効化でエラーが発生しましたが続行します"
+    dnf config-manager --enable mysql90-community || {
+        echo "警告: mysql90-communityリポジトリが見つかりません。利用可能な最新バージョンを確認しています..."
+        LATEST_REPO=$(dnf repolist all | grep "mysql.*-community" | sort -Vr | head -n 1 | awk '{print $1}')
+        if [ -n "$LATEST_REPO" ]; then
+            echo "利用可能な最新のMySQLリポジトリを有効化します: $LATEST_REPO"
+            dnf config-manager --enable "$LATEST_REPO"
         fi
-    fi
-
-    # 両方のハッシュ値が一致した場合のみ処理を続行
-    if [ "$actual_sha512" == "$repository_hash" ] && [ "$actual_sha3_512" == "$repository_hash_sha3" ]; then
-        echo "ハッシュ検証が成功しました。リポジトリスクリプトを実行します..."
-        chmod +x "$repository_file_path"
-        source "$repository_file_path"
-        rm -f "$repository_file_path"
-    else
-        echo "エラー: リポジトリスクリプトのハッシュ検証に失敗しました。"
-        echo "期待されるSHA512: $repository_hash"
-        echo "実際のSHA512: $actual_sha512"
-        echo "期待されるSHA3-512: $repository_hash_sha3"
-        echo "実際のSHA3-512: $actual_sha3_512"
-        rm -f "$repository_file_path"
-        exit 1
-    fi
+    }
+    rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql-2022
     echo "リポジトリのインストールが完了しました"
     end_message "EPELリポジトリとremiリポジトリのインストール"
 
-        # dnf updateを実行
+        # システムアップデート
         start_message
-        echo "システムをアップデートします"
-        # アップデートスクリプトをGitHubから/tmpにダウンロードして実行
-        if ! curl --tlsv1.3 --proto https -o "$update_file_path" https://raw.githubusercontent.com/buildree/common/main/system/update.sh; then
-            echo "エラー: ファイルのダウンロードに失敗しました"
-            exit 1
-        fi
-
-        # ファイルの存在を確認
-        if [ ! -f "$update_file_path" ]; then
-            echo "エラー: ダウンロードしたファイルが見つかりません: $update_file_path"
-            exit 1
-        fi
-
-        # ファイルのSHA512ハッシュ値を計算
-        actual_sha512=$(sha512sum "$update_file_path" 2>/dev/null | awk '{print $1}')
-        if [ -z "$actual_sha512" ]; then
-            echo "エラー: SHA512ハッシュの計算に失敗しました"
-            exit 1
-        fi
-
-        # ファイルのSHA3-512ハッシュ値を計算
-        actual_sha3_512=$(sha3sum -a 512 "$update_file_path" 2>/dev/null | awk '{print $1}')
-
-        # システムにsha3sumがない場合の代替手段
-        if [ -z "$actual_sha3_512" ]; then
-            # OpenSSLを使用する方法
-            actual_sha3_512=$(openssl dgst -sha3-512 "$update_file_path" 2>/dev/null | awk '{print $2}')
-            
-            # それでも取得できない場合はエラー
-            if [ -z "$actual_sha3_512" ]; then
-                echo "エラー: SHA3-512ハッシュの計算に失敗しました。sha3sumまたはOpenSSLがインストールされていることを確認してください"
-                exit 1
-            fi
-        fi
-
-        # 両方のハッシュ値が一致した場合のみ処理を続行
-        if [ "$actual_sha512" == "$update_hash" ] && [ "$actual_sha3_512" == "$update_hash_sha3" ]; then
-            echo "両方のハッシュ値が一致します。"
-            echo "このスクリプトは安全のためインストール作業を実施します"
-            
-            # 実行権限を付与
-            chmod +x "$update_file_path"
-            
-            # スクリプトを実行
-            source "$update_file_path"
-            
-            # 実行後に削除
-            rm -f "$update_file_path"
-        else
-            echo "ハッシュ値が一致しません！"
-            echo "期待されるSHA512: $update_hash"
-            echo "実際のSHA512: $actual_sha512"
-            echo "期待されるSHA3-512: $update_hash_sha3"
-            echo "実際のSHA3-512: $actual_sha3_512"
-            
-            # セキュリティリスクを軽減するため、検証に失敗したファイルを削除
-            rm -f "$update_file_path"
-            exit 1 #一致しない場合は終了
-        fi
+        echo "システムを最新版に更新します"
+        dnf -y update
         end_message
 
     # SELinuxの状態確認（ツールのインストールの代わりにチェックのみ実行）
@@ -338,128 +253,191 @@ EOF
 
     # MySQLのインストール
     start_message "MySQLのインストール"
-    echo "MySQLインストールスクリプトをダウンロードしています..."
-    
-    # MySQLインストールスクリプトをダウンロード
-    if ! curl --tlsv1.3 --proto https -o "$mysql_file_path" https://raw.githubusercontent.com/buildree/common/main/database/rdbm90.sh; then
-        echo "エラー: MySQLインストールスクリプトのダウンロードに失敗しました"
-        exit 1
-    fi
 
-    # ファイルの存在を確認
-    if [ ! -f "$mysql_file_path" ]; then
-        echo "エラー: ダウンロードしたファイルが見つかりません: $mysql_file_path"
-        exit 1
-    fi
+    mysql_log_message() {
+      echo -e "\n[$(date '+%Y-%m-%d %H:%M:%S')] $1\n"
+    }
+    mysql_handle_error() {
+      mysql_log_message "エラーが発生しました: $1"
+      exit 1
+    }
+    mysql_warn_message() {
+      mysql_log_message "警告: $1 - 処理を続行します"
+    }
 
-    # ファイルのSHA512ハッシュ値を計算
-    actual_sha512=$(sha512sum "$mysql_file_path" 2>/dev/null | awk '{print $1}')
-    if [ -z "$actual_sha512" ]; then
-        echo "エラー: SHA512ハッシュの計算に失敗しました"
-        exit 1
-    fi
-
-    # ファイルのSHA3-512ハッシュ値を計算
-    actual_sha3_512=$(sha3sum -a 512 "$mysql_file_path" 2>/dev/null | awk '{print $1}')
-
-    # システムにsha3sumがない場合の代替手段
-    if [ -z "$actual_sha3_512" ]; then
-        # OpenSSLを使用する方法
-        actual_sha3_512=$(openssl dgst -sha3-512 "$mysql_file_path" 2>/dev/null | awk '{print $2}')
-        
-        # それでも取得できない場合はエラー
-        if [ -z "$actual_sha3_512" ]; then
-            echo "エラー: SHA3-512ハッシュの計算に失敗しました。sha3sumまたはOpenSSLがインストールされていることを確認してください"
-            exit 1
-        fi
-    fi
-
-    # 両方のハッシュ値が一致した場合のみ処理を続行
-    if [ "$actual_sha512" == "$mysql_hash" ] && [ "$actual_sha3_512" == "$mysql_hash_sha3" ]; then
-        echo "ハッシュ検証が成功しました。MySQLのインストールを続行します。"
-        
-        # 実行権限を付与
-        chmod +x "$mysql_file_path"
-        
-        # スクリプトを実行
-        bash "$mysql_file_path"
-        
-        # 実行後に削除
-        rm -f "$mysql_file_path"
+    # 元のMySQLモジュールを無効化（存在する場合のみ）
+    mysql_log_message "既存のMySQLモジュールの確認と無効化を試みています..."
+    if dnf module list mysql &>/dev/null; then
+      mysql_log_message "MySQLモジュールが存在します。無効化を試みます..."
+      dnf module disable -y mysql || mysql_warn_message "MySQLモジュールの無効化に失敗しました"
     else
-        echo "エラー: MySQLインストールスクリプトのハッシュ検証に失敗しました。"
-        echo "期待されるSHA512: $mysql_hash"
-        echo "実際のSHA512: $actual_sha512"
-        echo "期待されるSHA3-512: $mysql_hash_sha3"
-        echo "実際のSHA3-512: $actual_sha3_512"
-        
-        # セキュリティリスクを軽減するため、検証に失敗したファイルを削除
-        rm -f "$mysql_file_path"
-        exit 1
+      mysql_log_message "システムにMySQLモジュールが見つかりません。無効化をスキップします。"
     fi
+
+    mysql_log_message "MySQL 9.0 Community Serverをインストールしています..."
+    dnf install -y mysql-community-server || mysql_handle_error "MySQLのインストールに失敗しました"
+
+    mysql_log_message "MySQLのバージョン確認:"
+    mysqld --version || mysql_handle_error "MySQLバージョン確認に失敗しました"
+
+    mysql_log_message "MySQL設定ファイルを構成しています..."
+    if [ -f /etc/my.cnf ]; then
+      mv /etc/my.cnf /etc/my.cnf.backup.$(date +%Y%m%d%H%M%S) || mysql_handle_error "my.cnfのバックアップに失敗しました"
+    fi
+    if [ -f /etc/my.cnf.d/mysql-server.cnf ]; then
+      mv /etc/my.cnf.d/mysql-server.cnf /etc/my.cnf.d/mysql-server.cnf.backup.$(date +%Y%m%d%H%M%S) || mysql_handle_error "mysql-server.cnfのバックアップに失敗しました"
+    fi
+
+    mkdir -p /var/log/mysql
+    chown mysql:mysql /var/log/mysql
+
+    cat <<'MYSQLCNF' > /etc/my.cnf
+# MySQL 9.0 設定ファイル
+# 参考: http://dev.mysql.com/doc/refman/9.0/en/server-configuration-defaults.html
+
+[mysqld]
+# 基本設定
+datadir=/var/lib/mysql
+socket=/var/lib/mysql/mysql.sock
+log-error=/var/log/mysqld.log
+pid-file=/var/run/mysqld/mysqld.pid
+
+# 文字コード設定
+character-set-server = utf8mb4
+collation-server = utf8mb4_bin
+
+# セキュリティ設定
+default_password_lifetime = 0
+max_allowed_packet = 16M
+max_connections = 151
+bind-address = 127.0.0.1
+
+# パフォーマンス設定
+innodb_buffer_pool_size = 128M
+join_buffer_size = 2M
+sort_buffer_size = 2M
+read_rnd_buffer_size = 2M
+
+# Slowクエリログ設定
+slow_query_log = ON
+slow_query_log_file = /var/log/mysql/mysql-slow.log
+long_query_time = 1.0
+log_queries_not_using_indexes = ON
+
+# タイムアウト設定
+interactive_timeout = 28800
+wait_timeout = 28800
+
+# MySQL 9.0の新機能設定
+# 注: MySQL 9.0の新機能に合わせてここにパラメータを追加
+
+[client]
+default-character-set = utf8mb4
+MYSQLCNF
+
+    mysql_log_message "MySQLの自動起動を設定しています..."
+    systemctl enable mysqld.service || mysql_handle_error "自動起動の設定に失敗しました"
+
+    mysql_log_message "MySQLを起動しています..."
+    systemctl start mysqld.service || mysql_handle_error "MySQLの起動に失敗しました"
+
+    mysql_log_message "MySQLのセキュリティ設定を行っています..."
+    DB_PASSWORD=$(grep "A temporary password is generated" /var/log/mysqld.log | sed -s 's/.*root@localhost: //')
+    if [ -z "$DB_PASSWORD" ]; then
+      mysql_handle_error "MySQLの一時パスワードを取得できませんでした"
+    fi
+
+    RPASSWORD=$(openssl rand -base64 16 | sed 's/[^a-zA-Z0-9]/#/g' | sed 's/^\([a-z]*\)/\u\1/g' | sed 's/$/@1A/')
+    UPASSWORD=$(openssl rand -base64 16 | sed 's/[^a-zA-Z0-9]/#/g' | sed 's/^\([a-z]*\)/\u\1/g' | sed 's/$/@1A/')
+
+    mysql_log_message "MySQLのrootパスワードを変更しています..."
+    mysql -u root -p"${DB_PASSWORD}" --connect-expired-password -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${RPASSWORD}'; FLUSH PRIVILEGES;" || mysql_handle_error "rootパスワードの変更に失敗しました"
+
+    mysql_log_message "アプリケーション用のデータベースとユーザーを作成しています..."
+    cat <<SQLEOF >/tmp/createdb.sql
+CREATE DATABASE IF NOT EXISTS unicorn DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
+CREATE USER IF NOT EXISTS 'unicorn'@'localhost' IDENTIFIED BY '${UPASSWORD}';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, INDEX, ALTER, CREATE TEMPORARY TABLES ON unicorn.* TO 'unicorn'@'localhost';
+FLUSH PRIVILEGES;
+SELECT user, host FROM mysql.user;
+SQLEOF
+
+    mysql -u root -p"${RPASSWORD}" -e "source /tmp/createdb.sql" || mysql_handle_error "データベースとユーザーの作成に失敗しました"
+    rm -f /tmp/createdb.sql
+
+    mysql_log_message "クライアント設定ファイルを作成しています..."
+    cat <<CLIENTEOF >/etc/my.cnf.d/unicorn.cnf
+[client]
+user = unicorn
+password = '${UPASSWORD}'
+host = localhost
+CLIENTEOF
+    chmod 600 /etc/my.cnf.d/unicorn.cnf
+
+    mysql_log_message "MySQLサービスを再起動しています..."
+    systemctl restart mysqld.service || mysql_handle_error "MySQLの再起動に失敗しました"
+
+    mysql_log_message "認証情報を保存しています..."
+    cat <<CREDEOF >/root/mysql_credentials.txt
+# MySQL 9.0認証情報 - $(date '+%Y-%m-%d %H:%M:%S')に生成
+# このファイルは機密情報を含みます。適切に保護してください。
+root_user = root
+root_password = ${RPASSWORD}
+app_user = unicorn
+app_password = ${UPASSWORD}
+database = unicorn
+mysql_version = 9.0
+CREDEOF
+    chmod 600 /root/mysql_credentials.txt
+
+    mysql_log_message "MySQLのセキュリティ強化を実施しています..."
+    mysql -u root -p"${RPASSWORD}" <<SECEOF
+DELETE FROM mysql.user WHERE User='';
+DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+FLUSH PRIVILEGES;
+SECEOF
+
+    mysql_log_message "MySQL 9.0のインストールと設定が完了しました"
     end_message "MySQLのインストール"
 
         # ユーザーを作成
         start_message
         echo "unicornユーザーを作成します"
 
-        # ユーザー作成スクリプトをダウンロード
-        if ! curl --tlsv1.3 --proto https -o "$useradd_file_path" https://raw.githubusercontent.com/buildree/common/main/user/useradd.sh; then
-            echo "エラー: ファイルのダウンロードに失敗しました"
+        USERNAME='unicorn'
+        PASSWORD=$(< /dev/urandom tr -dc '[:alnum:]' | head -c32)
+
+        useradd -m -s /bin/bash $USERNAME
+        if [ $? -ne 0 ]; then
+            echo "ユーザー作成に失敗しました。"
             exit 1
         fi
+        echo "$PASSWORD" | passwd --stdin $USERNAME
 
-        # ファイルの存在を確認
-        if [ ! -f "$useradd_file_path" ]; then
-            echo "エラー: ダウンロードしたファイルが見つかりません: $useradd_file_path"
-            exit 1
-        fi
+        mkdir -p /home/${USERNAME}/.ssh
+        chmod 700 /home/${USERNAME}/.ssh
+        ssh-keygen -t ed25519 -N "" -f /home/${USERNAME}/.ssh/${USERNAME}
+        chmod 644 /home/${USERNAME}/.ssh/${USERNAME}.pub
+        chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh
+        cat /home/${USERNAME}/.ssh/${USERNAME}.pub >> /home/${USERNAME}/.ssh/authorized_keys
+        chmod 600 /home/${USERNAME}/.ssh/authorized_keys
+        chmod 600 /home/${USERNAME}/.ssh/${USERNAME}
+        cp /home/${USERNAME}/.ssh/${USERNAME} /home/${USERNAME}/
+        chown ${USERNAME}:${USERNAME} /home/${USERNAME}/${USERNAME}
+        rm /home/${USERNAME}/.ssh/${USERNAME}
 
-        # ファイルのSHA512ハッシュ値を計算
-        actual_sha512=$(sha512sum "$useradd_file_path" 2>/dev/null | awk '{print $1}')
-        if [ -z "$actual_sha512" ]; then
-            echo "エラー: SHA512ハッシュの計算に失敗しました"
-            exit 1
-        fi
-
-        # ファイルのSHA3-512ハッシュ値を計算
-        actual_sha3_512=$(sha3sum -a 512 "$useradd_file_path" 2>/dev/null | awk '{print $1}')
-
-        # システムにsha3sumがない場合の代替手段
-        if [ -z "$actual_sha3_512" ]; then
-            # OpenSSLを使用する方法
-            actual_sha3_512=$(openssl dgst -sha3-512 "$useradd_file_path" 2>/dev/null | awk '{print $2}')
-            
-            # それでも取得できない場合はエラー
-            if [ -z "$actual_sha3_512" ]; then
-                echo "エラー: SHA3-512ハッシュの計算に失敗しました。sha3sumまたはOpenSSLがインストールされていることを確認してください"
-                exit 1
-            fi
-        fi
-
-        # 両方のハッシュ値が一致した場合のみ処理を続行
-        if [ "$actual_sha512" == "$useradd_hash" ] && [ "$actual_sha3_512" == "$useradd_hash_sha3" ]; then
-            echo "ハッシュ検証が成功しました。ユーザー作成を続行します。"
-            
-            # 実行権限を付与
-            chmod +x "$useradd_file_path"
-            
-            # スクリプトを実行
-            source "$useradd_file_path"
-            
-            # 実行後に削除
-            rm -f "$useradd_file_path"
-        else
-            echo "エラー: ハッシュ検証に失敗しました。"
-            echo "期待されるSHA512: $useradd_hash"
-            echo "実際のSHA512: $actual_sha512"
-            echo "期待されるSHA3-512: $useradd_hash_sha3"
-            echo "実際のSHA3-512: $actual_sha3_512"
-            
-            # セキュリティリスクを軽減するため、検証に失敗したファイルを削除
-            rm -f "$useradd_file_path"
-            exit 1
-        fi
+        echo "ed25519 SSH鍵が生成されました。"
+        echo "秘密鍵: /home/${USERNAME}/${USERNAME}"
+        echo "公開鍵: /home/${USERNAME}/.ssh/${USERNAME}.pub"
+        echo "秘密鍵が /home/${USERNAME}/${USERNAME} に移動されました。"
+        echo "秘密鍵のパーミッションは 600 に設定されています。"
+        echo "このファイルを安全な方法でクライアントマシンに移動し、サーバーからは削除することを強く推奨します。"
+        echo "秘密鍵はサーバー上に保管せず、使用するクライアントマシンにのみ保管してください。"
+        echo "公開鍵をクライアントマシンの ~/.ssh/authorized_keys ファイルに追加してください。"
+        echo "必要に応じて、秘密鍵にパスフレーズを設定してください。"
+        echo "ユーザーのパスワードはランダムで生成されています。セキュリティの関係上表示したりファイルに残していないので新しく設定してください。"
         end_message
 
     # ドキュメントルート所有者変更
