@@ -334,7 +334,7 @@ MYSQLCNF
     UPASSWORD=$(openssl rand -base64 16 | sed 's/[^a-zA-Z0-9]/#/g' | sed 's/^\([a-z]*\)/\u\1/g' | sed 's/$/@1A/')
 
     mysql_log_message "MySQLのrootパスワードを変更しています..."
-    mysql -u root -p"${DB_PASSWORD}" --connect-expired-password -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${RPASSWORD}'; FLUSH PRIVILEGES;" || mysql_handle_error "rootパスワードの変更に失敗しました"
+    MYSQL_PWD="${DB_PASSWORD}" mysql -u root --connect-expired-password -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${RPASSWORD}'; FLUSH PRIVILEGES;" || mysql_handle_error "rootパスワードの変更に失敗しました"
 
     mysql_log_message "アプリケーション用のデータベースとユーザーを作成しています..."
     cat <<SQLEOF >/tmp/createdb.sql
@@ -345,7 +345,7 @@ FLUSH PRIVILEGES;
 SELECT user, host FROM mysql.user;
 SQLEOF
 
-    mysql -u root -p"${RPASSWORD}" -e "source /tmp/createdb.sql" || mysql_handle_error "データベースとユーザーの作成に失敗しました"
+    MYSQL_PWD="${RPASSWORD}" mysql -u root -e "source /tmp/createdb.sql" || mysql_handle_error "データベースとユーザーの作成に失敗しました"
     rm -f /tmp/createdb.sql
 
     mysql_log_message "クライアント設定ファイルを作成しています..."
@@ -372,7 +372,7 @@ CREDEOF
     chmod 600 /root/mysql_credentials.txt
 
     mysql_log_message "MySQLのセキュリティ強化を実施しています..."
-    mysql -u root -p"${RPASSWORD}" <<SECEOF
+    MYSQL_PWD="${RPASSWORD}" mysql -u root <<SECEOF
 DELETE FROM mysql.user WHERE User='';
 DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
 DROP DATABASE IF EXISTS test;
