@@ -1,16 +1,25 @@
 #!/bin/sh
 
 # メッセージ表示関数
+EXECUTED_STEPS=""
+WARNINGS=""
+
 start_message() {
     echo ""
     echo "======================開始: $1 ======================"
     echo ""
+    EXECUTED_STEPS="${EXECUTED_STEPS}- $1"$'\n'
 }
 
 end_message() {
     echo ""
     echo "======================完了: $1 ======================"
     echo ""
+}
+
+warn_message() {
+    echo "警告: $1"
+    WARNINGS="${WARNINGS}- $1"$'\n'
 }
 
 # 起動メッセージ
@@ -29,7 +38,7 @@ Buildree Apache インストールスクリプト
   - SSL設定
   - gzip圧縮の有効化
   - htaccess許可
-  - PHP 8.2のインストール（remiリポジトリ使用）
+  - PHP 8.5のインストール（remiリポジトリ使用）
   - PHP-FPMの設定
   - unicornユーザーの自動作成
   - SELinux対応の自動設定
@@ -98,7 +107,7 @@ if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_
             GPG_KEY="https://yum.oracle.com/RPM-GPG-KEY-oracle-ol$DIST_VERSION_ID"
             ;;
         *)
-            echo "警告: 認識されないディストリビューションですが、処理を続行します"
+            warn_message "認識されないディストリビューションですが、処理を続行します"
             GPG_KEY="https://repo.almalinux.org/almalinux/RPM-GPG-KEY-AlmaLinux"
             ;;
     esac
@@ -123,17 +132,18 @@ if [ -e /etc/redhat-release ] && [[ "$DIST_MAJOR_VERSION" -eq 8 || "$DIST_MAJOR_
     elif [ "$DIST_MAJOR_VERSION" = "10" ]; then
         rpm -ivh https://dev.mysql.com/get/mysql84-community-release-el10-2.noarch.rpm
     fi
-    dnf config-manager --disable mysql84-community
-    dnf config-manager --enable mysql84-community
+    dnf config-manager --disable mysql84-community 2>/dev/null
+    dnf config-manager --disable mysql-8.4-lts-community 2>/dev/null
+    dnf config-manager --enable mysql-8.4-lts-community
     rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql-2022
     echo "リポジトリのインストールが完了しました"
     end_message "EPELリポジトリとremiリポジトリのインストール"
 
         # システムアップデート
-        start_message
+        start_message "システムアップデート"
         echo "システムを最新版に更新します"
         dnf -y update
-        end_message
+        end_message "システムアップデート"
 
     # SELinuxの状態確認（ツールのインストールの代わりにチェックのみ実行）
     start_message "SELinuxの状態確認"
@@ -183,22 +193,22 @@ EOF
     start_message "標準のPHPを無効化"
     echo "標準のPHPモジュールをリセットしています..."
     dnf module reset php -y
-    echo "remiリポジトリのPHP8.2を有効化しています..."
-    dnf module enable -y php:remi-8.2
-    echo "PHP8.2モジュールの有効化が完了しました"
+    echo "remiリポジトリのPHP8.5を有効化しています..."
+    dnf module enable -y php:remi-8.5
+    echo "PHP8.5モジュールの有効化が完了しました"
     end_message "標準のPHPを無効化"
 
-    # PHP8.2をインストール
-    start_message "PHP8.2をインストール"
+    # PHP8.5をインストール
+    start_message "PHP8.5をインストール"
     echo "PHPの依存ライブラリ(libzip-devel)をインストールしています..."
     dnf install -y libzip-devel
-    echo "PHP8.2と必要なモジュールをインストールしています..."
+    echo "PHP8.5と必要なモジュールをインストールしています..."
     echo "インストール中のパッケージ: php php-cli php-fpm php-mbstring php-xml php-json php-mysqlnd php-zip php-gd php-curl php-openssl php-tokenizer php-xmlwriter php-common"
     dnf install -y php php-cli php-fpm php-mbstring php-xml php-json php-mysqlnd php-zip php-gd php-curl php-openssl php-tokenizer php-xmlwriter php-common
-    echo "PHP8.2のインストールが完了しました"
+    echo "PHP8.5のインストールが完了しました"
     echo "インストールされたPHPのバージョン:"
     php -v
-    end_message "PHP8.2をインストール"
+    end_message "PHP8.5をインストール"
 
 
     # php-fpmで動くように追記
@@ -247,6 +257,7 @@ EOF
     }
     mysql_warn_message() {
       mysql_log_message "警告: $1 - 処理を続行します"
+      WARNINGS="${WARNINGS}- $1"$'\n'
     }
 
     # 元のMySQLモジュールを無効化（存在する場合のみ）
@@ -384,7 +395,7 @@ SECEOF
     end_message "MySQLのインストール"
 
         # ユーザーを作成
-        start_message
+        start_message "unicornユーザー作成"
         echo "unicornユーザーを作成します"
 
         USERNAME='unicorn'
@@ -419,7 +430,7 @@ SECEOF
         echo "公開鍵をクライアントマシンの ~/.ssh/authorized_keys ファイルに追加してください。"
         echo "必要に応じて、秘密鍵にパスフレーズを設定してください。"
         echo "ユーザーのパスワードはランダムで生成されています。セキュリティの関係上表示したりファイルに残していないので新しく設定してください。"
-        end_message
+        end_message "unicornユーザー作成"
 
     # ドキュメントルート所有者変更
     start_message "ドキュメントルート所有者変更"
@@ -484,10 +495,10 @@ start_message "SELinux設定"
         echo "webusersグループのメンバーは /var/www/html 配下で自由にコンテンツを作成できます"
         echo "注意: 新しいユーザーを追加する場合は 'usermod -a -G webusers ユーザー名' を実行してください"
     elif [ "$SELINUX_STATUS" = "Permissive" ]; then
-        echo "SELinuxはPermissive状態です。必要に応じてEnforcing状態に変更してください。"
+        warn_message "SELinuxはPermissive状態です。必要に応じてEnforcing状態に変更してください。"
         echo "※Enforcing状態に変更する場合は、再度このスクリプトを実行するか、SELinuxポリシーを手動で設定してください。"
     else
-        echo "SELinuxが無効またはインストールされていないため、SELinuxポリシー設定をスキップします"
+        warn_message "SELinuxが無効またはインストールされていないため、SELinuxポリシー設定をスキップします"
     fi
     end_message "SELinux設定"
 
@@ -533,9 +544,38 @@ start_message "SELinux設定"
         end_message "権限設定"
 
 
-cat <<EOF
-LAMP環境構築完了！
+    # インストールサマリーの作成
+    build_summary() {
+        cat <<SUMMARYEOF
+Buildree インストールサマリー - $(date '+%Y-%m-%d %H:%M:%S')
 
+======================実行内容サマリー======================
+${EXECUTED_STEPS}
+======================作成・変更したファイル======================
+- /etc/httpd/conf.d/gzip.conf : gzip圧縮設定を新規作成
+- /etc/httpd/conf/httpd.conf : PHP-FPM連携用のFastCGIハンドラーを追記
+- /etc/php.ini : expose_php無効化、タイムゾーン(Asia/Tokyo)、open_basedir、アップロードサイズ(32MB)等を変更
+- /var/www/html/info.php : phpinfo()確認用ファイルを新規作成
+- /etc/my.cnf : MySQL 8.4用設定ファイルを新規作成(既存ファイルがあった場合は日時付きでバックアップ)
+- /etc/my.cnf.d/mysql-server.cnf : 既存ファイルがあった場合、日時付きでバックアップ
+- /etc/my.cnf.d/unicorn.cnf : unicornユーザー用MySQLクライアント認証情報ファイルを新規作成(パーミッション600)
+- /root/mysql_credentials.txt : MySQL root/unicornアプリユーザーのパスワードを記載した認証情報ファイルを新規作成(パーミッション600)
+- /home/unicorn/.ssh/unicorn.pub : unicornユーザーのSSH公開鍵
+- /home/unicorn/.ssh/authorized_keys : 上記公開鍵を登録
+- /home/unicorn/unicorn : unicornユーザーのSSH秘密鍵(パーミッション600)
+- /home/unicorn/buildree_install_summary.txt : 本サマリー自体
+
+======================unicornユーザーの認証情報======================
+- OSログイン方式: SSH鍵認証(ed25519)
+  - 秘密鍵: /home/unicorn/unicorn (パーミッション600)
+  - 公開鍵: /home/unicorn/.ssh/unicorn.pub
+  - OSパスワードはランダム生成後、画面表示・ファイル保存はしていません(セキュリティのため)。必要な場合は passwd unicorn で再設定してください。
+- MySQL認証情報: /root/mysql_credentials.txt に保存済み(root/unicornアプリユーザーのパスワードを含む。パーミッション600)
+
+======================警告======================
+$( [ -n "$WARNINGS" ] && printf '%s' "$WARNINGS" || echo "警告はありませんでした" )
+
+======================アクセス方法・注意事項======================
 アクセス方法:
 - http://IPアドレス   または ドメイン名
 - https://IPアドレス  または ドメイン名
@@ -578,7 +618,16 @@ SELinux設定:
 - 認証情報は /root/mysql_credentials.txt に保存されています
 - セキュリティのため、重要な環境では認証情報をより安全な場所に移動することを検討してください
 - mysql --defaults-file=/etc/my.cnf.d/unicorn.cnf コマンドでMySQLに接続できます
-EOF
+SUMMARYEOF
+    }
+
+    SUMMARY_TEXT=$(build_summary)
+    echo "$SUMMARY_TEXT"
+    echo "$SUMMARY_TEXT" > /home/unicorn/buildree_install_summary.txt
+    chown unicorn:unicorn /home/unicorn/buildree_install_summary.txt
+    chmod 600 /home/unicorn/buildree_install_summary.txt
+    echo ""
+    echo "このサマリーは /home/unicorn/buildree_install_summary.txt に保存されました。"
 
 else
     echo "エラー: このスクリプトはRHEL/CentOS/AlmaLinux/Rocky Linux/Oracle Linux 8、9または10専用です。"
