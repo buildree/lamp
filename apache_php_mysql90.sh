@@ -559,6 +559,11 @@ LAMP環境構築完了！
 - http://IPアドレス   または ドメイン名
 - https://IPアドレス  または ドメイン名
 
+PHPの動作確認:
+- http://IPアドレス または ドメイン名/info.php にアクセスするとphpinfo()の内容が表示されます
+- 確認後はセキュリティのため info.php を削除することを推奨します
+  (rm -f /var/www/html/info.php)
+
 設定ファイル: /etc/httpd/conf.d/ドメイン名.conf
 ドキュメントルート: /var/www/html
 
